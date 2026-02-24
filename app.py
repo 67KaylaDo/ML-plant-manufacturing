@@ -298,72 +298,66 @@ with tab4:
     st.json(stores["notifications"][-10:])
 
 
-# ===================================================
-# TAB 5 — AI Copilot
-# ===================================================
+# ----------------------------
+# TAB 5 — AI Copilot (Grounded Chat)
+# ----------------------------
 with tab5:
     st.subheader("🤖 AI Copilot (Grounded Chat)")
 
-    ground_context = {
-        "last_event": st.session_state.last_event,
-        "final_packet": st.session_state.last_run["final_packet"]
-        if st.session_state.last_run
-        else None,
-        "ui_trace": st.session_state.last_run["ui_trace"]
-        if st.session_state.last_run
-        else None,
-        "approvals": list(stores["approvals"].values()),
-        "work_orders": list(stores["work_orders"].values()),
-        "notifications": stores["notifications"],
-    }
+    # Ensure chat history exists
+    if "copilot_messages" not in st.session_state:
+        st.session_state.copilot_messages = []
 
-    colA, colB, colC = st.columns(3)
+    def build_copilot_context() -> dict:
+        """Ground the copilot in the latest system state."""
+        return {
+            "final_packet": st.session_state.get("last_run", {}).get("final_packet"),
+            "ui_trace": st.session_state.get("last_run", {}).get("ui_trace", []),
+            "approvals": st.session_state.get("approvals", []),
+            "work_orders": st.session_state.get("work_orders", {}),
+            "notifications": st.session_state.get("notifications", []),
+            "audit_log": st.session_state.get("audit_log", []),
+        }
 
-    if colA.button("Explain latest recommendation"):
-        st.session_state.chat_copilot.append(
-            {
-                "role": "user",
-                "content": "Explain the latest maintenance recommendation packet and reasoning.",
-            }
-        )
+    def send_copilot_message(text: str):
+        text = (text or "").strip()
+        if not text:
+            return
 
-    if colB.button("Show strongest evidence"):
-        st.session_state.chat_copilot.append(
-            {
-                "role": "user",
-                "content": "What is the strongest evidence for the highest risk asset?",
-            }
-        )
+        # 1) append user message
+        st.session_state.copilot_messages.append({"role": "user", "content": text})
 
-    if colC.button("What needs approval?"):
-        st.session_state.chat_copilot.append(
-            {
-                "role": "user",
-                "content": "Which actions require human approval right now?",
-            }
-        )
+        # 2) compute assistant answer
+        from ml_plant.chat_agent import answer_question
+        ctx = build_copilot_context()
+        reply = answer_question(text, ctx)
 
-    for msg in st.session_state.chat_copilot:
+        # 3) append assistant message
+        st.session_state.copilot_messages.append({"role": "assistant", "content": reply})
+
+        # 4) rerun to refresh UI immediately
+        st.rerun()
+
+    # Buttons should submit messages immediately
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        if st.button("Explain latest recommendation", use_container_width=True):
+            send_copilot_message("Explain the latest maintenance recommendation packet and reasoning.")
+    with c2:
+        if st.button("Show strongest evidence", use_container_width=True):
+            send_copilot_message("What is the strongest evidence for the highest risk asset?")
+    with c3:
+        if st.button("What needs approval?", use_container_width=True):
+            send_copilot_message("What needs approval right now? List pending approvals and why.")
+
+    st.divider()
+
+    # Render chat history
+    for msg in st.session_state.copilot_messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    q2 = st.chat_input("Ask the Copilot...")
-    if q2:
-        st.session_state.chat_copilot.append(
-            {"role": "user", "content": q2}
-        )
-
-        with st.chat_message("user"):
-            st.write(q2)
-
-        try:
-            answer = answer_question(q2, ground_context)
-        except Exception as e:
-            answer = f"Error calling Gemini: {e}"
-
-        st.session_state.chat_copilot.append(
-            {"role": "assistant", "content": answer}
-        )
-
-        with st.chat_message("assistant"):
-            st.write(answer)
+    # Chat input (typing + enter)
+    user_text = st.chat_input("Ask the Copilot…")
+    if user_text:
+        send_copilot_message(user_text)
