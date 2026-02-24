@@ -22,7 +22,6 @@ st.set_page_config(
 )
 
 st.title("🏭 ML-plant-manufacturing — Agentic AI Multi-Agent MVP")
-
 st.caption(
     "Event-driven, multi-agent predictive maintenance system with Orchestrator, "
     "Signal Triage, Prognostics, and Maintenance Decision agents."
@@ -30,7 +29,7 @@ st.caption(
 
 
 # ---------------------------------------------------
-# Session State Initialization
+# Session State
 # ---------------------------------------------------
 if "stores" not in st.session_state:
     st.session_state.stores = init_stores()
@@ -51,7 +50,7 @@ stores = st.session_state.stores
 
 
 # ---------------------------------------------------
-# Sidebar Agentic Chat
+# Sidebar Chat
 # ---------------------------------------------------
 st.sidebar.header("💬 Agentic AI Chat")
 
@@ -80,9 +79,7 @@ if q:
     except Exception as e:
         reply = f"Error calling Gemini: {e}"
 
-    st.session_state.chat_sidebar.append(
-        {"role": "assistant", "content": reply}
-    )
+    st.session_state.chat_sidebar.append({"role": "assistant", "content": reply})
     with st.sidebar.chat_message("assistant"):
         st.write(reply)
 
@@ -102,7 +99,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 
 
 # ===================================================
-# TAB 1 — Generate Synthetic Data
+# TAB 1 — Generate Synthetic Data + Preview Alerts
 # ===================================================
 with tab1:
     st.subheader("Synthetic Plant Setup")
@@ -165,9 +162,27 @@ with tab1:
             st.success("Event created.")
             st.json(event)
 
+            # -------- Alert Transparency Preview --------
+            st.write("### 🔎 Preview: First 10 Alerts")
+            st.write(f"Total alerts generated: {len(stores['alerts'])}")
+            st.json(stores["alerts"][:10])
+
+            counts = {}
+            for a in stores["alerts"]:
+                counts[a["asset_id"]] = counts.get(a["asset_id"], 0) + 1
+
+            st.write("### 📊 Alerts per Asset (Top 10)")
+            st.json(
+                dict(
+                    sorted(counts.items(), key=lambda x: x[1], reverse=True)[
+                        :10
+                    ]
+                )
+            )
+
 
 # ===================================================
-# TAB 2 — Run Multi-Agent Workflow
+# TAB 2 — Select Alerts + Run Workflow
 # ===================================================
 with tab2:
     st.subheader("Run Multi-Agent Predictive Maintenance Workflow")
@@ -177,10 +192,42 @@ with tab2:
     else:
         st.json(st.session_state.last_event)
 
+        alert_assets = sorted(
+            list({a["asset_id"] for a in stores["alerts"]})
+        )
+
+        st.write("### Select which assets continue into workflow")
+        selected_assets = st.multiselect(
+            "Assets to include",
+            options=alert_assets,
+            default=alert_assets[: min(5, len(alert_assets))]
+            if alert_assets
+            else [],
+        )
+
+        forced_asset = None
+        if len(selected_assets) >= 2:
+            forced_asset = selected_assets[1]
+            st.info(
+                f"Demo rule: forcing human approval for 2nd selected asset → **{forced_asset}**"
+            )
+        elif len(selected_assets) == 1:
+            st.warning(
+                "Select at least 2 assets to guarantee approval in Tab 3."
+            )
+
         if st.button("Run Workflow Now", type="primary"):
+
+            # Store forced approval asset for T9 tool
+            stores["force_approval_assets"] = (
+                [forced_asset] if forced_asset else []
+            )
+
             st.session_state.last_run = (
                 run_predictive_maintenance_workflow(
-                    stores, st.session_state.last_event
+                    stores,
+                    st.session_state.last_event,
+                    constraints={"selected_asset_ids": selected_assets},
                 )
             )
 
@@ -196,7 +243,9 @@ with tab2:
                         st.json(step["output"])
 
             with col_right:
-                st.write("### 📦 Final Maintenance Recommendation Packet")
+                st.write(
+                    "### 📦 Final Maintenance Recommendation Packet"
+                )
                 st.json(result["final_packet"])
 
 
@@ -204,7 +253,7 @@ with tab2:
 # TAB 3 — Approval Inbox
 # ===================================================
 with tab3:
-    st.subheader("Approval Inbox (Policy Gate Simulation)")
+    st.subheader("Approval Inbox (Human-in-the-Loop)")
 
     pending = [
         a for a in stores["approvals"].values() if a["status"] == "PENDING"

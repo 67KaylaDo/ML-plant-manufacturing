@@ -57,6 +57,11 @@ def T8_maintenance_window_optimize(stores: dict, asset_id: str, risk_profile: di
 
 def T9_policy_check(stores: dict, asset_id: str, recommended_action: str, expected_impact: dict) -> dict:
     requires = False
+    # DEMO: force approval for specific assets (so Tab 3 is never empty)
+    force_assets = set(stores.get("force_approval_assets", []))
+    if asset_id in force_assets:
+        requires = True
+    
     if recommended_action == "shutdown_request":
         requires = True
     if recommended_action == "planned_maintenance" and expected_impact.get("expected_downtime_cost", 0) > 120000:
